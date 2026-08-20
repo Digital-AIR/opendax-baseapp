@@ -1,0 +1,55 @@
+name: Upload to Amazon ECR
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: 
+      - main
+    types: [closed]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: bizinex/webapp
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Get version
+      run: echo RELEASE_VERSION=$(awk '/"version":(.*?)/' package.json | sed 's/"//g' | sed 's/version://g' | sed 's/,//g' | sed 's/[\t ]//g;/^$/d') >> $GITHUB_ENV
+  
+    - name: Build, tag
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        NEXT_PUBLIC_HOME_URL: "/projects"
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$RELEASE_VERSION --build-arg NEXT_PUBLIC_HOME_URL=${{ env.NEXT_PUBLIC_HOME_URL }} .
+        docker image tag $ECR_REGISTRY/$ECR_REPOSITORY:$RELEASE_VERSION $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+    - name: Push image to Amazon ECR
+      id: push-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$RELEASE_VERSION
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
